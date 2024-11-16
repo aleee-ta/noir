@@ -43,7 +43,7 @@ pub(super) fn optimize_internal<F: AcirField>(acir: Circuit<F>) -> (Circuit<F>, 
     }
 
     info!("Number of opcodes before: {}", acir.opcodes.len());
-
+    info!("ACIR before: {}", acir);
     // General optimizer pass
     let opcodes: Vec<Opcode<F>> = acir
         .opcodes
@@ -57,12 +57,12 @@ pub(super) fn optimize_internal<F: AcirField>(acir: Circuit<F>) -> (Circuit<F>, 
         })
         .collect();
     let acir = Circuit { opcodes, ..acir };
-
+    info!("ACIR after general_optimizer: {}", acir);
     // Unused memory optimization pass
     let memory_optimizer = UnusedMemoryOptimizer::new(acir);
     let (acir, acir_opcode_positions) =
         memory_optimizer.remove_unused_memory_initializations(acir_opcode_positions);
-
+    info!("ACIR after memory_optimizer: {}", acir);
     // let (acir, acir_opcode_positions) =
     // ConstantBackpropagationOptimizer::backpropagate_constants(acir, acir_opcode_positions);
 
@@ -75,6 +75,6 @@ pub(super) fn optimize_internal<F: AcirField>(acir: Circuit<F>) -> (Circuit<F>, 
     // ConstantBackpropagationOptimizer::backpropagate_constants(acir, acir_opcode_positions);
 
     info!("Number of opcodes after: {}", acir.opcodes.len());
-
+    info!("ACIR after: {}", acir);
     (acir, acir_opcode_positions)
 }
