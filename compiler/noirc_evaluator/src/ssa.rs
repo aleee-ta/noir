@@ -394,6 +394,7 @@ struct SsaBuilder {
     ssa: Ssa,
     print_ssa_passes: bool,
     print_codegen_timings: bool,
+    emit_ssa: Option<PathBuf>
 }
 
 impl SsaBuilder {
@@ -405,17 +406,17 @@ impl SsaBuilder {
         emit_ssa: &Option<PathBuf>,
     ) -> Result<SsaBuilder, RuntimeError> {
         let ssa = ssa_gen::generate_ssa(program, force_brillig_runtime)?;
-        if let Some(emit_ssa) = emit_ssa {
-            let mut emit_ssa_dir = emit_ssa.clone();
+        if Some(emit_ssa) {
+            let mut emit_ssa_dir = emit_ssa.unwrap().clone();
             // We expect the full package artifact path to be passed in here,
             // and attempt to create the target directory if it does not exist.
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
             create_named_dir(emit_ssa_dir.as_ref(), "log");
-            let ssa_path = emit_ssa.with_extension("ssa.json");
+            let ssa_path = emit_ssa.unwrap().with_extension("ssa.json");
             write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
         }
-        Ok(SsaBuilder { print_ssa_passes, print_codegen_timings, ssa }.print("Initial SSA:"))
+        Ok(SsaBuilder { print_ssa_passes, print_codegen_timings, ssa, emit_ssa }.print("Initial SSA:","initial"))
     }
 
     fn finish(self) -> Ssa {
@@ -435,10 +436,12 @@ impl SsaBuilder {
     fn try_run_pass(
         mut self,
         pass: fn(Ssa) -> Result<Ssa, RuntimeError>,
+        pass_name: &str,
         msg: &str,
     ) -> Result<Self, RuntimeError> {
         self.ssa = time(msg, self.print_codegen_timings, || pass(self.ssa))?;
-        Ok(self.print(msg))
+        
+        Ok(self.print(msg, pass_name))
     }
 
     fn print(mut self, msg: &str, pass_name: &str) -> Self {
@@ -448,7 +451,7 @@ impl SsaBuilder {
         }
         if Some(self.emit_ssa) {
             self.ssa.normalize_ids();
-            let mut emit_ssa_dir = emit_ssa.clone();
+            let mut emit_ssa_dir = self.emit_ssa.unwrap().clone();
             emit_ssa_dir.pop();
             write_to_file(self.ssa.as_bytes(), self.emit_ssa_dir.as_ref().join(format!("log/{}", pass_name)));
         }
