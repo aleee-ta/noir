@@ -453,7 +453,8 @@ impl SsaBuilder {
             self.ssa.normalize_ids();
             let mut emit_ssa_dir: PathBuf = self.emit_ssa.unwrap().clone();
             emit_ssa_dir.pop();
-            write_to_file(format!("{}", self.ssa).as_bytes(), <PathBuf as AsRef<T>>::as_ref(&emit_ssa_dir).join(format!("log/{}", pass_name)));
+            emit_ssa_dir.join(format!("log/{}", pass_name));
+            write_to_file(format!("{}", self.ssa).as_bytes(), emit_ssa_dir);
         }
         self
     }
