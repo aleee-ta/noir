@@ -407,13 +407,13 @@ impl SsaBuilder {
     ) -> Result<SsaBuilder, RuntimeError> {
         let ssa = ssa_gen::generate_ssa(program, force_brillig_runtime)?;
         if emit_ssa.is_some() {
-            let mut emit_ssa_dir = emit_ssa.unwrap().clone();
+            let mut emit_ssa_dir = emit_ssa.clone().unwrap();
             // We expect the full package artifact path to be passed in here,
             // and attempt to create the target directory if it does not exist.
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
             create_named_dir(emit_ssa_dir.as_ref(), "log");
-            let ssa_path = emit_ssa.unwrap().with_extension("ssa.json");
+            let ssa_path = emit_ssa.clone().unwrap().with_extension("ssa.json");
             write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
         }
         Ok(SsaBuilder { print_ssa_passes, print_codegen_timings, ssa, emit_ssa: emit_ssa.clone() }.print("Initial SSA:","initial"))
@@ -451,7 +451,7 @@ impl SsaBuilder {
         }
         if self.emit_ssa.is_some() {
             self.ssa.normalize_ids();
-            let mut emit_ssa_dir: PathBuf = self.emit_ssa.unwrap().clone();
+            let mut emit_ssa_dir: PathBuf = self.emit_ssa.clone().unwrap();
             emit_ssa_dir.pop();
             emit_ssa_dir.join(format!("log/{}", pass_name));
             write_to_file(format!("{}", self.ssa).as_bytes(), &emit_ssa_dir);
