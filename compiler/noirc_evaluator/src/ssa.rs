@@ -452,7 +452,8 @@ impl SsaBuilder {
         if self.emit_ssa.is_some() {
             self.ssa.normalize_ids();
             let mut emit_ssa_dir: PathBuf = self.emit_ssa.clone().unwrap();
-            emit_ssa_dir.pop().pop();
+            emit_ssa_dir.pop();
+            emit_ssa_dir.pop();
             emit_ssa_dir = emit_ssa_dir.join(format!("log/{}", pass_name));
             write_to_file(format!("{}", self.ssa).as_bytes(), &emit_ssa_dir);
         }
