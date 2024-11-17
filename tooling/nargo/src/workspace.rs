@@ -49,7 +49,10 @@ impl Workspace {
     pub fn export_directory_path(&self) -> PathBuf {
         self.root_dir.join(EXPORT_DIR)
     }
-
+    
+    pub fn log_directory_path(&self) -> PathBuf {
+        self.root_dir.join(LOG_DIR)
+    }
     /// Returns a new `FileManager` for the root directory of this workspace.
     /// If the root directory is not the standard library, the standard library
     /// is added to the returned `FileManager`.
