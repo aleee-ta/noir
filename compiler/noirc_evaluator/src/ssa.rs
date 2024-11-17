@@ -412,7 +412,8 @@ impl SsaBuilder {
             // and attempt to create the target directory if it does not exist.
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
-            println!("{}", emit_ssa_dir.display());
+            emit_ssa_dir.pop();
+            emit_ssa_dir = emit_ssa_dir.join("log");
             create_named_dir(emit_ssa_dir.as_ref(), "log");
             let ssa_path = emit_ssa.clone().unwrap().with_extension("ssa.json");
             write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
