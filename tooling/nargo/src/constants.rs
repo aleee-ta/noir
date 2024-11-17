@@ -9,6 +9,8 @@ pub const SRC_DIR: &str = "src";
 pub const TARGET_DIR: &str = "target";
 /// The directory to store serialized ACIR representations of exported library functions.
 pub const EXPORT_DIR: &str = "export";
+/// The directory to log intermediate state of ACIR between optimizations.
+pub const LOG_DIR: &str = "log";
 
 // Files
 /// The file from which Nargo pulls prover inputs
