@@ -94,40 +94,42 @@ pub(crate) fn optimize_into_acir(
         options.print_codegen_timings,
         &options.emit_ssa,
     )?
-    .run_pass(Ssa::defunctionalize, "After Defunctionalization:")
-    .run_pass(Ssa::remove_paired_rc, "After Removing Paired rc_inc & rc_decs:")
-    .run_pass(Ssa::separate_runtime, "After Runtime Separation:")
-    .run_pass(Ssa::resolve_is_unconstrained, "After Resolving IsUnconstrained:")
-    .run_pass(|ssa| ssa.inline_functions(options.inliner_aggressiveness), "After Inlining (1st):")
+    .run_pass(Ssa::defunctionalize, "defunctionalize1", "After Defunctionalization:")
+    .run_pass(Ssa::remove_paired_rc, "remove_paired_rc1", "After Removing Paired rc_inc & rc_decs:")
+    .run_pass(Ssa::separate_runtime, "separate_runtime1", "After Runtime Separation:")
+    .run_pass(Ssa::resolve_is_unconstrained, "resolve_is_unconstrained1", "After Resolving IsUnconstrained:")
+    .run_pass(|ssa| ssa.inline_functions(options.inliner_aggressiveness), "inline_functions1", "After Inlining (1st):")
     // Run mem2reg with the CFG separated into blocks
-    .run_pass(Ssa::mem2reg, "After Mem2Reg (1st):")
-    .run_pass(Ssa::simplify_cfg, "After Simplifying (1st):")
-    .run_pass(Ssa::as_slice_optimization, "After `as_slice` optimization")
+    .run_pass(Ssa::mem2reg, "mem2reg1", "After Mem2Reg (1st):")
+    .run_pass(Ssa::simplify_cfg, "simplify_cfg1", "After Simplifying (1st):")
+    .run_pass(Ssa::as_slice_optimization, "as_slice_optimization1", "After `as_slice` optimization")
     .try_run_pass(
         Ssa::evaluate_static_assert_and_assert_constant,
+        "evaluate_static_assert_and_assert_constant",
         "After `static_assert` and `assert_constant`:",
     )?
-    .try_run_pass(Ssa::unroll_loops_iteratively, "After Unrolling:")?
-    .run_pass(Ssa::simplify_cfg, "After Simplifying (2nd):")
-    .run_pass(Ssa::flatten_cfg, "After Flattening:")
-    .run_pass(Ssa::remove_bit_shifts, "After Removing Bit Shifts:")
+    .try_run_pass(Ssa::unroll_loops_iteratively, "unroll_loops_iteratively1", "After Unrolling:")?
+    .run_pass(Ssa::simplify_cfg, "simplify_cfg2", "After Simplifying (2nd):")
+    .run_pass(Ssa::flatten_cfg, "flatten_cfg1", "After Flattening:")
+    .run_pass(Ssa::remove_bit_shifts, "remove_bit_shifts1", "After Removing Bit Shifts:")
     // Run mem2reg once more with the flattened CFG to catch any remaining loads/stores
-    .run_pass(Ssa::mem2reg, "After Mem2Reg (2nd):")
+    .run_pass(Ssa::mem2reg, "mem2reg2", "After Mem2Reg (2nd):")
     // Run the inlining pass again to handle functions with `InlineType::NoPredicates`.
     // Before flattening is run, we treat functions marked with the `InlineType::NoPredicates` as an entry point.
     // This pass must come immediately following `mem2reg` as the succeeding passes
     // may create an SSA which inlining fails to handle.
     .run_pass(
         |ssa| ssa.inline_functions_with_no_predicates(options.inliner_aggressiveness),
+        "inline_functions_with_no_predicates1",
         "After Inlining (2nd):",
     )
-    .run_pass(Ssa::remove_if_else, "After Remove IfElse:")
-    .run_pass(Ssa::fold_constants, "After Constant Folding:")
-    .run_pass(Ssa::remove_enable_side_effects, "After EnableSideEffectsIf removal:")
-    .run_pass(Ssa::fold_constants_using_constraints, "After Constraint Folding:")
-    .run_pass(Ssa::dead_instruction_elimination, "After Dead Instruction Elimination:")
-    .run_pass(Ssa::simplify_cfg, "After Simplifying:")
-    .run_pass(Ssa::array_set_optimization, "After Array Set Optimizations:")
+    .run_pass(Ssa::remove_if_else, "remove_if_else", "After Remove IfElse:")
+    .run_pass(Ssa::fold_constants, "fold_constants1", "After Constant Folding:")
+    .run_pass(Ssa::remove_enable_side_effects, "remove_enable_side_effects1", "After EnableSideEffectsIf removal:")
+    .run_pass(Ssa::fold_constants_using_constraints, "fold_constants_using_constraints1", "After Constraint Folding:")
+    .run_pass(Ssa::dead_instruction_elimination, "dead_instruction_elimination1", "After Dead Instruction Elimination:")
+    .run_pass(Ssa::simplify_cfg, "simplify_cfg3", "After Simplifying:")
+    .run_pass(Ssa::array_set_optimization, "array_set_optimization1", "After Array Set Optimizations:")
     .finish();
 
     let ssa_level_warnings = if options.skip_underconstrained_check {
@@ -409,6 +411,7 @@ impl SsaBuilder {
             // and attempt to create the target directory if it does not exist.
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
+            create_named_dir(emit_ssa_dir.as_ref(), "log");
             let ssa_path = emit_ssa.with_extension("ssa.json");
             write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
         }
@@ -420,12 +423,12 @@ impl SsaBuilder {
     }
 
     /// Runs the given SSA pass and prints the SSA afterward if `print_ssa_passes` is true.
-    fn run_pass<F>(mut self, pass: F, msg: &str) -> Self
+    fn run_pass<F>(mut self, pass: F, pass_name: &str, msg: &str) -> Self
     where
         F: FnOnce(Ssa) -> Ssa,
     {
         self.ssa = time(msg, self.print_codegen_timings, || pass(self.ssa));
-        self.print(msg)
+        self.print(msg, pass_name)
     }
 
     /// The same as `run_pass` but for passes that may fail
@@ -438,10 +441,16 @@ impl SsaBuilder {
         Ok(self.print(msg))
     }
 
-    fn print(mut self, msg: &str) -> Self {
+    fn print(mut self, msg: &str, pass_name: &str) -> Self {
         if self.print_ssa_passes {
             self.ssa.normalize_ids();
             println!("{msg}\n{}", self.ssa);
+        }
+        if Some(self.emit_ssa) {
+            self.ssa.normalize_ids();
+            let mut emit_ssa_dir = emit_ssa.clone();
+            emit_ssa_dir.pop();
+            write_to_file(self.ssa.as_bytes(), self.emit_ssa_dir.as_ref().join(format!("log/{}", pass_name)));
         }
         self
     }
