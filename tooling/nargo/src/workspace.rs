@@ -13,7 +13,7 @@ use fm::FileManager;
 use noirc_driver::file_manager_with_stdlib;
 
 use crate::{
-    constants::{CONTRACT_DIR, EXPORT_DIR, PROOFS_DIR, TARGET_DIR},
+    constants::{CONTRACT_DIR, EXPORT_DIR, PROOFS_DIR, TARGET_DIR, LOG_DIR},
     package::Package,
 };
 
