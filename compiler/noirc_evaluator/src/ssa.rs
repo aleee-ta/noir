@@ -94,7 +94,7 @@ pub(crate) fn optimize_into_acir(
         options.print_codegen_timings,
         &options.emit_ssa,
     )?
-    .run_pass(Ssa::defunctionalize, "defunctionalize1", "After Defunctionalization:")
+    .run_pass(Ssa::defunctionalize, "1.SSA_defunctionalize1", "After Defunctionalization:")
     .run_pass(Ssa::remove_paired_rc, "remove_paired_rc1", "After Removing Paired rc_inc & rc_decs:")
     .run_pass(Ssa::separate_runtime, "separate_runtime1", "After Runtime Separation:")
     .run_pass(Ssa::resolve_is_unconstrained, "resolve_is_unconstrained1", "After Resolving IsUnconstrained:")
