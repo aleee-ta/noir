@@ -17,6 +17,7 @@ mod tests {
             print_codegen_timings: false,
             expression_width: ExpressionWidth::default(),
             emit_ssa: None,
+            dump_ssa: None,
             skip_underconstrained_check: true,
             skip_brillig_constraints_check: true,
             inliner_aggressiveness: 0,

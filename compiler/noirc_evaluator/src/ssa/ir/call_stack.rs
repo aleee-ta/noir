@@ -125,4 +125,8 @@ impl CallStackHelper {
     pub(crate) fn get_or_insert_locations(&mut self, locations: CallStack) -> CallStackId {
         self.extend_call_stack(CallStackId::root(), &locations)
     }
+
+    pub(crate) fn get_location(&self, call_stack_id: &CallStackId) -> Location {
+        self.locations[call_stack_id.index()].value.clone()
+    }
 }

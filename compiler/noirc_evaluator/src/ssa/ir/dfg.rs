@@ -1,6 +1,9 @@
 use std::{borrow::Cow, sync::Arc};
+use noirc_errors::Location;
+use std::fmt;
 
 use crate::ssa::{function_builder::data_bus::DataBus, ir::instruction::SimplifyResult};
+use crate::ssa::ir::printer::display_instruction;
 
 use super::{
     basic_block::{BasicBlock, BasicBlockId},
@@ -16,6 +19,8 @@ use super::{
 
 use acvm::{acir::AcirField, FieldElement};
 use fxhash::FxHashMap as HashMap;
+use std::collections::HashMap as PlainHashMap;
+
 use iter_extended::vecmap;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -752,6 +757,37 @@ impl DataFlowGraph {
             }
             _ => None,
         }
+    }
+}
+
+struct KostilFormatter<'a> {
+    buffer: &'a mut String,
+}
+
+impl<'a> KostilFormatter<'a> {
+    fn new(buffer: &'a mut String) -> Self {
+        KostilFormatter { buffer }
+    }
+}
+
+impl<'a> fmt::Write for KostilFormatter<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.buffer.push_str(s);
+        Ok(())
+    }
+}
+
+impl DataFlowGraph {
+    pub(crate) fn dump_instructions_with_locations(&self) -> PlainHashMap<usize, (Location, String)> {
+        let mut hm = PlainHashMap::<usize, (Location, String)>::new();
+        for (id,_instruction) in self.instructions.iter() {
+            let mut instruction_string = String::new();
+            let mut buffer = KostilFormatter::new(&mut instruction_string);
+            let _ = display_instruction(&self, id, false, &mut buffer);
+            instruction_string = instruction_string[4..instruction_string.len()-1].to_string();
+            hm.insert(self.locations[&id].index(), (self.call_stack_data.get_location(&self.locations[&id]), instruction_string));
+        }
+        hm
     }
 }
 

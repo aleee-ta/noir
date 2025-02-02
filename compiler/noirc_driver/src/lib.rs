@@ -86,6 +86,9 @@ pub struct CompileOptions {
     pub emit_ssa: bool,
 
     #[arg(long, hide = true)]
+    pub dump_ssa: bool,
+
+    #[arg(long, hide = true)]
     pub show_brillig: bool,
 
     /// Display the ACIR for compiled circuit
@@ -646,7 +649,8 @@ pub fn compile_no_check(
         || options.show_brillig
         || options.force_brillig
         || options.show_ssa
-        || options.emit_ssa;
+        || options.emit_ssa
+        || options.dump_ssa;
 
     // Hash the AST program, which is going to be used to fingerprint the compilation artifact.
     let hash = fxhash::hash64(&program);
@@ -678,6 +682,7 @@ pub fn compile_no_check(
             ExpressionWidth::default()
         },
         emit_ssa: if options.emit_ssa { Some(context.package_build_path.clone()) } else { None },
+        dump_ssa: if options.dump_ssa { Some(context.package_build_path.clone()) } else { None },
         skip_underconstrained_check: options.skip_underconstrained_check,
         skip_brillig_constraints_check: options.skip_brillig_constraints_check,
         inliner_aggressiveness: options.inliner_aggressiveness,

@@ -1,5 +1,6 @@
 //! This file is for pretty-printing the SSA IR in a human-readable form for debugging.
-use std::fmt::{Display, Formatter, Result};
+use std::fmt::{Display, Formatter, Result, Write};
+
 
 use acvm::acir::AcirField;
 use im::Vector;
@@ -152,11 +153,11 @@ fn display_terminator(
 }
 
 /// Display an arbitrary instruction
-fn display_instruction(
+pub(crate) fn display_instruction(
     dfg: &DataFlowGraph,
     instruction: InstructionId,
     in_global_space: bool,
-    f: &mut Formatter,
+    f: &mut dyn Write,
 ) -> Result {
     if !in_global_space {
         // instructions are always indented within a function
@@ -180,7 +181,7 @@ fn display_instruction_inner(
     instruction: &Instruction,
     results: &[ValueId],
     in_global_space: bool,
-    f: &mut Formatter,
+    f: &mut dyn Write,
 ) -> Result {
     let show = |id| value(dfg, id);
 
@@ -349,7 +350,7 @@ pub(crate) fn try_to_extract_string_from_error_payload(
 fn display_constrain_error(
     dfg: &DataFlowGraph,
     error: &ConstrainError,
-    f: &mut Formatter,
+    f: &mut dyn Write,
 ) -> Result {
     match error {
         ConstrainError::StaticString(assert_message_string) => {
