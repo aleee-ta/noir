@@ -227,6 +227,7 @@ pub fn compile(
         print_codegen_timings: options.benchmark_codegen,
         expression_width: ExpressionWidth::default(),
         emit_ssa: { None },
+        cache_ssa: { None },
         skip_underconstrained_check: options.skip_underconstrained_check,
         skip_brillig_constraints_check: true,
         inliner_aggressiveness: options.inliner_aggressiveness,

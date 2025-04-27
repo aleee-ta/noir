@@ -40,6 +40,8 @@ use noirc_frontend::{hir_def::function::FunctionSignature, monomorphization::ast
 use ssa_gen::Ssa;
 use tracing::{Level, span};
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::acir::GeneratedAcir;
 
 mod checks;
@@ -73,6 +75,7 @@ pub struct SsaEvaluatorOptions {
 
     /// Dump the unoptimized SSA to the supplied path if it exists
     pub emit_ssa: Option<PathBuf>,
+    pub cache_ssa: Option<PathBuf>,
 
     /// Skip the check for under constrained values
     pub skip_underconstrained_check: bool,
@@ -98,23 +101,24 @@ pub struct SsaEvaluatorOptions {
 /// which facilitates equivalence testing between different
 /// stages of the processing pipeline.
 pub struct SsaPass<'a> {
+    name: &'static str,
     msg: &'static str,
     run: Box<dyn Fn(Ssa) -> Result<Ssa, RuntimeError> + 'a>,
 }
 
 impl<'a> SsaPass<'a> {
-    pub(crate) fn new<F>(f: F, msg: &'static str) -> Self
+    pub(crate) fn new<F>(f: F, name: &'static str, msg: &'static str) -> Self
     where
         F: Fn(Ssa) -> Ssa + 'a,
     {
-        Self::new_try(move |ssa| Ok(f(ssa)), msg)
+        Self::new_try(move |ssa| Ok(f(ssa)), name, msg)
     }
 
-    pub(crate) fn new_try<F>(f: F, msg: &'static str) -> Self
+    pub(crate) fn new_try<F>(f: F, name: &'static str, msg: &'static str) -> Self
     where
         F: Fn(Ssa) -> Result<Ssa, RuntimeError> + 'a,
     {
-        Self { msg, run: Box::new(f) }
+        Self { msg, name, run: Box::new(f) }
     }
 }
 
@@ -126,78 +130,159 @@ pub struct ArtifactsAndWarnings(pub Artifacts, pub Vec<SsaReport>);
 /// something we take can advantage of in the [secondary_passes].
 pub fn primary_passes(options: &SsaEvaluatorOptions) -> Vec<SsaPass> {
     vec![
-        SsaPass::new(Ssa::remove_unreachable_functions, "Removing Unreachable Functions"),
-        SsaPass::new(Ssa::defunctionalize, "Defunctionalization"),
-        SsaPass::new(Ssa::inline_simple_functions, "Inlining simple functions"),
+        SsaPass::new(
+            Ssa::remove_unreachable_functions,
+            "01_remove_unreachable_functions",
+            "Removing Unreachable Functions",
+        ),
+        SsaPass::new(Ssa::defunctionalize, "02_defunctionalize", "Defunctionalization"),
+        SsaPass::new(
+            Ssa::inline_simple_functions,
+            "03_inline_simple_functions",
+            "Inlining simple functions",
+        ),
         // BUG: Enabling this mem2reg causes an integration test failure in aztec-package; see:
         // https://github.com/AztecProtocol/aztec-packages/pull/11294#issuecomment-2622809518
         //SsaPass::new(Ssa::mem2reg, "Mem2Reg (1st)"),
-        SsaPass::new(Ssa::remove_paired_rc, "Removing Paired rc_inc & rc_decs"),
+        SsaPass::new(
+            Ssa::remove_paired_rc,
+            "04_remove_paired_rc",
+            "Removing Paired rc_inc & rc_decs",
+        ),
         SsaPass::new(
             move |ssa| ssa.preprocess_functions(options.inliner_aggressiveness),
+            "05_preprocess_functions",
             "Preprocessing Functions",
         ),
-        SsaPass::new(move |ssa| ssa.inline_functions(options.inliner_aggressiveness), "Inlining"),
+        SsaPass::new(
+            move |ssa| ssa.inline_functions(options.inliner_aggressiveness),
+            "06_inline_functions",
+            "Inlining",
+        ),
         // Run mem2reg with the CFG separated into blocks
-        SsaPass::new(Ssa::mem2reg, "Mem2Reg"),
-        SsaPass::new(Ssa::simplify_cfg, "Simplifying"),
-        SsaPass::new(Ssa::as_slice_optimization, "`as_slice` optimization"),
-        SsaPass::new(Ssa::remove_unreachable_functions, "Removing Unreachable Functions"),
+        SsaPass::new(Ssa::mem2reg, "07_mem2reg", "Mem2Reg"),
+        SsaPass::new(Ssa::simplify_cfg, "08_simplify_cfg", "Simplifying"),
+        SsaPass::new(
+            Ssa::as_slice_optimization,
+            "09_as_slice_optimization",
+            "`as_slice` optimization",
+        ),
+        SsaPass::new(
+            Ssa::remove_unreachable_functions,
+            "10_remove_unreachable_functions",
+            "Removing Unreachable Functions",
+        ),
         SsaPass::new_try(
             Ssa::evaluate_static_assert_and_assert_constant,
+            "11_evaluate_static_assert_and_assert_constant",
             "`static_assert` and `assert_constant`",
         ),
-        SsaPass::new(Ssa::purity_analysis, "Purity Analysis"),
-        SsaPass::new(Ssa::loop_invariant_code_motion, "Loop Invariant Code Motion"),
+        SsaPass::new(Ssa::purity_analysis, "12_purity_analysis", "Purity Analysis"),
+        SsaPass::new(
+            Ssa::loop_invariant_code_motion,
+            "13_loop_invariant_code_motion",
+            "Loop Invariant Code Motion",
+        ),
         SsaPass::new_try(
             move |ssa| ssa.unroll_loops_iteratively(options.max_bytecode_increase_percent),
+            "14_unroll_loops_iteratively",
             "Unrolling",
         ),
-        SsaPass::new(Ssa::simplify_cfg, "Simplifying"),
-        SsaPass::new(Ssa::mem2reg, "Mem2Reg"),
-        SsaPass::new(Ssa::flatten_cfg, "Flattening"),
-        SsaPass::new(Ssa::remove_bit_shifts, "Removing Bit Shifts"),
+        SsaPass::new(Ssa::simplify_cfg, "15_simplify_cfg", "Simplifying"),
+        SsaPass::new(Ssa::mem2reg, "16_mem2reg", "Mem2Reg"),
+        SsaPass::new(Ssa::flatten_cfg, "17_flatten_cfg", "Flattening"),
+        SsaPass::new(Ssa::remove_bit_shifts, "18_remove_bit_shifts", "Removing Bit Shifts"),
         // Run mem2reg once more with the flattened CFG to catch any remaining loads/stores
-        SsaPass::new(Ssa::mem2reg, "Mem2Reg"),
+        SsaPass::new(Ssa::mem2reg, "19_mem2reg", "Mem2Reg"),
         // Run the inlining pass again to handle functions with `InlineType::NoPredicates`.
         // Before flattening is run, we treat functions marked with the `InlineType::NoPredicates` as an entry point.
         // This pass must come immediately following `mem2reg` as the succeeding passes
         // may create an SSA which inlining fails to handle.
         SsaPass::new(
             move |ssa| ssa.inline_functions_with_no_predicates(options.inliner_aggressiveness),
+            "20_inline_functions_with_no_predicates",
             "Inlining",
         ),
-        SsaPass::new(Ssa::remove_if_else, "Remove IfElse"),
-        SsaPass::new(Ssa::purity_analysis, "Purity Analysis"),
-        SsaPass::new(Ssa::fold_constants, "Constant Folding"),
-        SsaPass::new(Ssa::flatten_basic_conditionals, "Simplify conditionals for unconstrained"),
-        SsaPass::new(Ssa::remove_enable_side_effects, "EnableSideEffectsIf removal"),
-        SsaPass::new(Ssa::fold_constants_using_constraints, "Constraint Folding"),
+        SsaPass::new(Ssa::remove_if_else, "21_remove_if_else", "Remove IfElse"),
+        SsaPass::new(Ssa::purity_analysis, "22_purity_analysis", "Purity Analysis"),
+        SsaPass::new(Ssa::fold_constants, "23_fold_constants", "Constant Folding"),
+        SsaPass::new(
+            Ssa::flatten_basic_conditionals,
+            "24_flatten_basic_conditionals",
+            "Simplify conditionals for unconstrained",
+        ),
+        SsaPass::new(
+            Ssa::remove_enable_side_effects,
+            "25_remove_enable_side_effects",
+            "EnableSideEffectsIf removal",
+        ),
+        SsaPass::new(
+            Ssa::fold_constants_using_constraints,
+            "26_fold_constants_using_constraints",
+            "Constraint Folding",
+        ),
         SsaPass::new_try(
             move |ssa| ssa.unroll_loops_iteratively(options.max_bytecode_increase_percent),
+            "27_unroll_loops_iteratively",
             "Unrolling",
         ),
-        SsaPass::new(Ssa::make_constrain_not_equal_instructions, "Adding constrain not equal"),
-        SsaPass::new(Ssa::check_u128_mul_overflow, "Check u128 mul overflow"),
-        SsaPass::new(Ssa::dead_instruction_elimination, "Dead Instruction Elimination"),
-        SsaPass::new(Ssa::simplify_cfg, "Simplifying"),
-        SsaPass::new(Ssa::mem2reg, "Mem2Reg"),
-        SsaPass::new(Ssa::array_set_optimization, "Array Set Optimizations"),
+        SsaPass::new(
+            Ssa::make_constrain_not_equal_instructions,
+            "28_make_constrain_not_equal_instructions",
+            "Adding constrain not equal",
+        ),
+        SsaPass::new(
+            Ssa::check_u128_mul_overflow,
+            "29_check_u128_mul_overflow",
+            "Check u128 mul overflow",
+        ),
+        SsaPass::new(
+            Ssa::dead_instruction_elimination,
+            "30_dead_instruction_elimination",
+            "Dead Instruction Elimination",
+        ),
+        SsaPass::new(Ssa::simplify_cfg, "31_simplify_cfg", "Simplifying"),
+        SsaPass::new(Ssa::mem2reg, "32_mem2reg", "Mem2Reg"),
+        SsaPass::new(
+            Ssa::array_set_optimization,
+            "33_array_set_optimization",
+            "Array Set Optimizations",
+        ),
         // The Brillig globals pass expected that we have the used globals map set for each function.
         // The used globals map is determined during DIE, so we should duplicate entry points before a DIE pass run.
-        SsaPass::new(Ssa::brillig_entry_point_analysis, "Brillig Entry Point Analysis"),
+        SsaPass::new(
+            Ssa::brillig_entry_point_analysis,
+            "34_brillig_entry_point_analysis",
+            "Brillig Entry Point Analysis",
+        ),
         // Remove any potentially unnecessary duplication from the Brillig entry point analysis.
-        SsaPass::new(Ssa::remove_unreachable_functions, "Removing Unreachable Functions"),
-        SsaPass::new(Ssa::remove_truncate_after_range_check, "Removing Truncate after RangeCheck"),
+        SsaPass::new(
+            Ssa::remove_unreachable_functions,
+            "35_remove_unreachable_functions",
+            "Removing Unreachable Functions",
+        ),
+        SsaPass::new(
+            Ssa::remove_truncate_after_range_check,
+            "36_remove_truncate_after_range_check",
+            "Removing Truncate after RangeCheck",
+        ),
         // This pass makes transformations specific to Brillig generation.
         // It must be the last pass to either alter or add new instructions before Brillig generation,
         // as other semantics in the compiler can potentially break (e.g. inserting instructions).
         // We can safely place the pass before DIE as that pass only removes instructions.
         // We also need DIE's tracking of used globals in case the array get transformations
         // end up using an existing constant from the globals space.
-        SsaPass::new(Ssa::brillig_array_gets, "Brillig Array Get Optimizations"),
-        SsaPass::new(Ssa::dead_instruction_elimination, "Dead Instruction Elimination"),
-        SsaPass::new(Ssa::checked_to_unchecked, "Checked to unchecked"),
+        SsaPass::new(
+            Ssa::brillig_array_gets,
+            "37_brillig_array_gets",
+            "Brillig Array Get Optimizations",
+        ),
+        SsaPass::new(
+            Ssa::dead_instruction_elimination,
+            "38_dead_instruction_elimination",
+            "Dead Instruction Elimination",
+        ),
+        SsaPass::new(Ssa::checked_to_unchecked, "39_checked_to_unchecked", "Checked to unchecked"),
     ]
 }
 
@@ -206,11 +291,23 @@ pub fn primary_passes(options: &SsaEvaluatorOptions) -> Vec<SsaPass> {
 /// to replace the calls with the return value.
 pub fn secondary_passes(brillig: &Brillig) -> Vec<SsaPass> {
     vec![
-        SsaPass::new(move |ssa| ssa.fold_constants_with_brillig(brillig), "Inlining Brillig Calls"),
+        SsaPass::new(
+            move |ssa| ssa.fold_constants_with_brillig(brillig),
+            "40_fold_constants_with_brillig",
+            "Inlining Brillig Calls",
+        ),
         // It could happen that we inlined all calls to a given brillig function.
         // In that case it's unused so we can remove it. This is what we check next.
-        SsaPass::new(Ssa::remove_unreachable_functions, "Removing Unreachable Functions"),
-        SsaPass::new(Ssa::dead_instruction_elimination_acir, "Dead Instruction Elimination"),
+        SsaPass::new(
+            Ssa::remove_unreachable_functions,
+            "41_remove_unreachable_functions",
+            "Removing Unreachable Functions",
+        ),
+        SsaPass::new(
+            Ssa::dead_instruction_elimination_acir,
+            "42_dead_instruction_elimination_acir",
+            "Dead Instruction Elimination",
+        ),
     ]
 }
 
@@ -240,6 +337,7 @@ where
     let ssa_gen_span_guard = ssa_gen_span.enter();
     let mut builder = builder.run_passes(primary)?;
     let passed = std::mem::take(&mut builder.passed);
+    let cache_ssa = builder.cache_ssa.clone();
     let mut ssa = builder.finish();
 
     let mut ssa_level_warnings = vec![];
@@ -258,6 +356,7 @@ where
         ssa_logging: options.ssa_logging.clone(),
         print_codegen_timings: options.print_codegen_timings,
         passed,
+        cache_ssa,
     }
     .run_passes(&secondary(&brillig))?
     .finish();
@@ -306,6 +405,7 @@ where
 pub fn optimize_into_acir<S>(
     program: Program,
     options: &SsaEvaluatorOptions,
+    timestamp: u64,
     primary: &[SsaPass],
     secondary: S,
 ) -> Result<ArtifactsAndWarnings, RuntimeError>
@@ -317,6 +417,8 @@ where
         options.ssa_logging.clone(),
         options.print_codegen_timings,
         &options.emit_ssa,
+        &options.cache_ssa,
+        timestamp,
     )?;
 
     optimize_ssa_builder_into_acir(builder, options, primary, secondary)
@@ -413,10 +515,12 @@ where
 
     let func_sigs = program.function_signatures.clone();
 
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
     let ArtifactsAndWarnings(
         (generated_acirs, generated_brillig, brillig_function_names, error_types),
         ssa_level_warnings,
-    ) = optimize_into_acir(program, options, primary, secondary)?;
+    ) = optimize_into_acir(program, options, timestamp, primary, secondary)?;
 
     assert_eq!(
         generated_acirs.len(),
@@ -443,6 +547,8 @@ where
             debug_variables.clone(),
             debug_functions.clone(),
             debug_types.clone(),
+            &options.cache_ssa,
+            timestamp,
         );
         program_artifact.add_circuit(circuit_artifact, is_main);
         is_main = false;
@@ -468,6 +574,8 @@ pub fn convert_generated_acir_into_circuit(
     debug_variables: DebugVariables,
     debug_functions: DebugFunctions,
     debug_types: DebugTypes,
+    cache_ssa: &Option<PathBuf>,
+    timestamp: u64,
 ) -> SsaCircuitArtifact {
     let opcodes = generated_acir.take_opcodes();
     let current_witness_index = generated_acir.current_witness_index().0;
@@ -516,9 +624,42 @@ pub fn convert_generated_acir_into_circuit(
         brillig_procedure_locs,
     );
 
+    //export initial ACIR
+    if let Some(cache_ssa) = cache_ssa {
+        let mut cache_ssa_dir_uw = cache_ssa.clone();
+        cache_ssa_dir_uw.pop();
+        cache_ssa_dir_uw.push("cache");
+        cache_ssa_dir_uw.push(timestamp.to_string());
+        cache_ssa_dir_uw.push("acir");
+        create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
+        cache_ssa_dir_uw.push("ACIR");
+        cache_ssa_dir_uw.set_extension("initial.acir.json");
+        write_to_file(&serde_json::to_vec(&circuit).unwrap(), &cache_ssa_dir_uw);
+        cache_ssa_dir_uw.pop();
+        cache_ssa_dir_uw.push("DEBUG");
+        cache_ssa_dir_uw.set_extension("initial.acir.json");
+        write_to_file(&serde_json::to_vec(&debug_info).unwrap(), &cache_ssa_dir_uw);
+    }
+
     // Perform any ACIR-level optimizations
     let (optimized_circuit, transformation_map) = acvm::compiler::optimize(circuit);
     debug_info.update_acir(transformation_map);
+
+    if let Some(cache_ssa) = cache_ssa {
+        let mut cache_ssa_dir_uw = cache_ssa.clone();
+        cache_ssa_dir_uw.pop();
+        cache_ssa_dir_uw.push("cache");
+        cache_ssa_dir_uw.push(timestamp.to_string());
+        cache_ssa_dir_uw.push("acir");
+        create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
+        cache_ssa_dir_uw.push("ACIR");
+        cache_ssa_dir_uw.set_extension("optimized.acir.json");
+        write_to_file(&serde_json::to_vec(&optimized_circuit).unwrap(), &cache_ssa_dir_uw);
+        cache_ssa_dir_uw.pop();
+        cache_ssa_dir_uw.push("DEBUG");
+        cache_ssa_dir_uw.set_extension("optimized.acir.json");
+        write_to_file(&serde_json::to_vec(&debug_info).unwrap(), &cache_ssa_dir_uw);
+    }
 
     SsaCircuitArtifact {
         name,
@@ -571,6 +712,7 @@ pub struct SsaBuilder {
     pub ssa_logging: SsaLogging,
     pub print_codegen_timings: bool,
     pub passed: HashMap<String, usize>,
+    pub cache_ssa: Option<PathBuf>,
 }
 
 impl SsaBuilder {
@@ -579,6 +721,8 @@ impl SsaBuilder {
         ssa_logging: SsaLogging,
         print_codegen_timings: bool,
         emit_ssa: &Option<PathBuf>,
+        cache_ssa: &Option<PathBuf>,
+        timestamp: u64,
     ) -> Result<SsaBuilder, RuntimeError> {
         let ssa = ssa_gen::generate_ssa(program)?;
         if let Some(emit_ssa) = emit_ssa {
@@ -590,9 +734,24 @@ impl SsaBuilder {
             let ssa_path = emit_ssa.with_extension("ssa.json");
             write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
         }
-        let builder =
-            SsaBuilder { ssa_logging, print_codegen_timings, ssa, passed: Default::default() };
-        let builder = builder.print("Initial SSA");
+        let mut cache_ssa_dir = None;
+        if let Some(cache_ssa) = cache_ssa {
+            let mut cache_ssa_dir_uw = cache_ssa.clone();
+            cache_ssa_dir_uw.pop();
+            cache_ssa_dir_uw.push("cache");
+            cache_ssa_dir_uw.push(timestamp.to_string());
+            cache_ssa_dir_uw.push("ssa");
+            create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/ssa");
+            cache_ssa_dir = Some(cache_ssa_dir_uw.clone());
+        }
+        let builder = SsaBuilder {
+            ssa_logging,
+            print_codegen_timings,
+            ssa,
+            passed: Default::default(),
+            cache_ssa: cache_ssa_dir,
+        };
+        let builder = builder.print("00_initial", "Initial SSA");
         Ok(builder)
     }
 
@@ -603,31 +762,31 @@ impl SsaBuilder {
     /// Run a list of SSA passes.
     fn run_passes(mut self, passes: &[SsaPass]) -> Result<Self, RuntimeError> {
         for pass in passes {
-            self = self.try_run_pass(|ssa| (pass.run)(ssa), pass.msg)?;
+            self = self.try_run_pass(|ssa| (pass.run)(ssa), pass.name, pass.msg)?;
         }
         Ok(self)
     }
 
     /// Runs the given SSA pass and prints the SSA afterward if `print_ssa_passes` is true.
     #[allow(dead_code)]
-    fn run_pass<F>(mut self, pass: F, msg: &str) -> Self
+    fn run_pass<F>(mut self, pass: F, name: &str, msg: &str) -> Self
     where
         F: FnOnce(Ssa) -> Ssa,
     {
         self.ssa = time(msg, self.print_codegen_timings, || pass(self.ssa));
-        self.print(msg)
+        self.print(name, msg)
     }
 
     /// The same as `run_pass` but for passes that may fail
-    fn try_run_pass<F>(mut self, pass: F, msg: &str) -> Result<Self, RuntimeError>
+    fn try_run_pass<F>(mut self, pass: F, name: &str, msg: &str) -> Result<Self, RuntimeError>
     where
         F: FnOnce(Ssa) -> Result<Ssa, RuntimeError>,
     {
         self.ssa = time(msg, self.print_codegen_timings, || pass(self.ssa))?;
-        Ok(self.print(msg))
+        Ok(self.print(name, msg))
     }
 
-    fn print(mut self, msg: &str) -> Self {
+    fn print(mut self, name: &str, msg: &str) -> Self {
         // Count the number of times we have seen this message.
         let cnt = self.passed.entry(msg.to_string()).and_modify(|cnt| *cnt += 1).or_insert(1);
         let msg = format!("{msg} ({cnt})");
@@ -651,6 +810,14 @@ impl SsaBuilder {
         if print_ssa_pass {
             println!("After {msg}:\n{}", self.ssa);
         }
+
+        if let Some(cache_ssa_dir) = &self.cache_ssa {
+            let mut ssa_path = cache_ssa_dir.clone();
+            ssa_path.push(name);
+            ssa_path.set_extension("ssa.json");
+            write_to_file(&serde_json::to_vec(&self.ssa).unwrap(), &ssa_path);
+        }
+
         self
     }
 }
