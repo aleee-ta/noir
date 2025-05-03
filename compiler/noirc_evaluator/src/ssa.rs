@@ -634,11 +634,11 @@ pub fn convert_generated_acir_into_circuit(
         create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
         cache_ssa_dir_uw.push("ACIR");
         cache_ssa_dir_uw.set_extension("initial.acir.json");
-        write_to_file(&serde_json::to_vec(&circuit).unwrap(), &cache_ssa_dir_uw);
+        write_to_file(&serde_json::to_vec_pretty(&circuit).unwrap(), &cache_ssa_dir_uw);
         cache_ssa_dir_uw.pop();
         cache_ssa_dir_uw.push("DEBUG");
         cache_ssa_dir_uw.set_extension("initial.acir.json");
-        write_to_file(&serde_json::to_vec(&debug_info).unwrap(), &cache_ssa_dir_uw);
+        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ssa_dir_uw);
     }
 
     // Perform any ACIR-level optimizations
@@ -654,11 +654,11 @@ pub fn convert_generated_acir_into_circuit(
         create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
         cache_ssa_dir_uw.push("ACIR");
         cache_ssa_dir_uw.set_extension("optimized.acir.json");
-        write_to_file(&serde_json::to_vec(&optimized_circuit).unwrap(), &cache_ssa_dir_uw);
+        write_to_file(&serde_json::to_vec_pretty(&optimized_circuit).unwrap(), &cache_ssa_dir_uw);
         cache_ssa_dir_uw.pop();
         cache_ssa_dir_uw.push("DEBUG");
         cache_ssa_dir_uw.set_extension("optimized.acir.json");
-        write_to_file(&serde_json::to_vec(&debug_info).unwrap(), &cache_ssa_dir_uw);
+        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ssa_dir_uw);
     }
 
     SsaCircuitArtifact {
@@ -732,7 +732,7 @@ impl SsaBuilder {
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
             let ssa_path = emit_ssa.with_extension("ssa.json");
-            write_to_file(&serde_json::to_vec(&ssa).unwrap(), &ssa_path);
+            write_to_file(&serde_json::to_vec_pretty(&ssa).unwrap(), &ssa_path);
         }
         let mut cache_ssa_dir = None;
         if let Some(cache_ssa) = cache_ssa {
@@ -814,8 +814,12 @@ impl SsaBuilder {
         if let Some(cache_ssa_dir) = &self.cache_ssa {
             let mut ssa_path = cache_ssa_dir.clone();
             ssa_path.push(name);
+            //ssa_path.set_extension("ssa.debug");
+            //write_to_file(format!("{:?}", &self.ssa).as_bytes(), &ssa_path);
+            //ssa_path.set_extension("ssa.tovec");
+            //write_to_file(format!("{:?}",&serde_json::to_vec_pretty(&self.ssa)).as_bytes(), &ssa_path);
             ssa_path.set_extension("ssa.json");
-            write_to_file(&serde_json::to_vec(&self.ssa).unwrap(), &ssa_path);
+            write_to_file(&serde_json::to_vec_pretty(&self.ssa).unwrap(), &ssa_path);
         }
 
         self
