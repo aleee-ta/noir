@@ -1,6 +1,8 @@
+use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use std::time::Duration;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use acvm::acir::circuit::ExpressionWidth;
 use fm::FileManager;
@@ -120,8 +122,17 @@ pub(super) fn compile_workspace_full(
 ) -> Result<(), CliError> {
     let (workspace_file_manager, parsed_files) = parse_workspace(workspace);
 
+    let mut modified_options = compile_options.clone();
+    modified_options.cache_ir = match &compile_options.cache_ir {
+        None => None,
+        Some(val) if val == "timestamp" => {
+            Some(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos().to_string())
+        }
+        Some(custom) => Some(custom.clone()),
+    };
+
     let compiled_workspace =
-        compile_workspace(&workspace_file_manager, &parsed_files, workspace, compile_options);
+        compile_workspace(&workspace_file_manager, &parsed_files, workspace, &modified_options);
 
     report_errors(
         compiled_workspace,
@@ -168,6 +179,27 @@ fn compile_workspace(
             Err([program_errors, contract_errors].concat())
         }
         (Err(errors), _) | (_, Err(errors)) => Err(errors),
+    }
+}
+
+// help func from ssa.rs
+fn create_named_dir(named_dir: &Path, name: &str) -> PathBuf {
+    std::fs::create_dir_all(named_dir)
+        .unwrap_or_else(|_| panic!("could not create the `{name}` directory"));
+
+    PathBuf::from(named_dir)
+}
+
+fn write_to_file(bytes: &[u8], path: &Path) {
+    let display = path.display();
+
+    let mut file = match File::create(path) {
+        Err(why) => panic!("couldn't create {display}: {why}"),
+        Ok(file) => file,
+    };
+
+    if let Err(why) = file.write_all(bytes) {
+        panic!("couldn't write to {display}: {why}");
     }
 }
 
@@ -229,8 +261,28 @@ fn compile_programs(
         // Check solvability.
         nargo::ops::check_program(&program)?;
         // Overwrite the build artifacts with the final circuit, which includes the backend specific transformations.
-        save_program_to_file(&program.into(), &package.name, &workspace.target_directory_path())
-            .expect("failed to save program");
+        save_program_to_file(
+            &program.clone().into(),
+            &package.name,
+            &workspace.target_directory_path(),
+        )
+        .expect("failed to save program");
+
+        if compile_options.cache_ir.is_some() {
+            let mut cache_path = (&workspace.target_directory_path()).clone();
+            cache_path.push("cache");
+            cache_path.push(compile_options.cache_ir.clone().unwrap());
+            cache_path.push("src");
+            create_named_dir(&cache_path, "target/cache/$timestamp/src");
+            for (file_id, debug_file) in &program.file_map {
+                cache_path.push(file_id.as_usize().to_string());
+                cache_path.set_extension("nr");
+                write_to_file(debug_file.source.as_bytes(), &cache_path);
+                cache_path.pop();
+            }
+            cache_path.pop();
+            let _ = save_program_to_file(&program.into(), &package.name, &cache_path);
+        }
 
         Ok(((), warnings))
     };

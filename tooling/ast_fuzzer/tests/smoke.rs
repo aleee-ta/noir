@@ -36,7 +36,7 @@ fn arb_program_can_be_executed() {
             print_codegen_timings: false,
             expression_width: ExpressionWidth::default(),
             emit_ssa: None,
-            cache_ssa: None,
+            cache_ir: None,
             skip_underconstrained_check: true,
             skip_brillig_constraints_check: true,
             enable_brillig_constraints_check_lookback: false,

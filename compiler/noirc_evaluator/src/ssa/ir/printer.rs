@@ -176,30 +176,44 @@ fn display_instruction(
         write!(f, "{} = ", value_list)?;
     }
 
-    display_instruction_inner(dfg, &dfg[instruction], results, in_global_space, f)
+    display_instruction_inner(dfg, &dfg[instruction], &instruction, results, in_global_space, f)
 }
 
 fn display_instruction_inner(
     dfg: &DataFlowGraph,
     instruction: &Instruction,
+    instruction_id: &InstructionId,
     results: &[ValueId],
     in_global_space: bool,
     f: &mut Formatter,
 ) -> Result {
     let show = |id| value(dfg, id);
-
+    let callstack_id = dfg.get_instruction_call_stack_id(*instruction_id);
     match instruction {
         Instruction::Binary(binary) => {
-            writeln!(f, "{} {}, {}", binary.operator, show(binary.lhs), show(binary.rhs))
+            writeln!(
+                f,
+                "{} {}, {} // L{}",
+                binary.operator,
+                show(binary.lhs),
+                show(binary.rhs),
+                callstack_id.index()
+            )
         }
-        Instruction::Cast(lhs, typ) => writeln!(f, "cast {} as {typ}", show(*lhs)),
-        Instruction::Not(rhs) => writeln!(f, "not {}", show(*rhs)),
+        Instruction::Cast(lhs, typ) => {
+            writeln!(f, "cast {} as {typ} // L{}", show(*lhs), callstack_id.index())
+        }
+        Instruction::Not(rhs) => writeln!(f, "not {} // L{}", show(*rhs), callstack_id.index()),
         Instruction::Truncate { value, bit_size, max_bit_size } => {
             let value = show(*value);
-            writeln!(f, "truncate {value} to {bit_size} bits, max_bit_size: {max_bit_size}",)
+            writeln!(
+                f,
+                "truncate {value} to {bit_size} bits, max_bit_size: {max_bit_size} // L{}",
+                callstack_id.index()
+            )
         }
         Instruction::Constrain(lhs, rhs, error) => {
-            write!(f, "constrain {} == {}", show(*lhs), show(*rhs))?;
+            write!(f, "constrain {} == {} // L{}", show(*lhs), show(*rhs), callstack_id.index())?;
             if let Some(error) = error {
                 display_constrain_error(dfg, error, f)
             } else {
@@ -207,7 +221,7 @@ fn display_instruction_inner(
             }
         }
         Instruction::ConstrainNotEqual(lhs, rhs, error) => {
-            write!(f, "constrain {} != {}", show(*lhs), show(*rhs))?;
+            write!(f, "constrain {} != {} // L{}", show(*lhs), show(*rhs), callstack_id.index())?;
             if let Some(error) = error {
                 display_constrain_error(dfg, error, f)
             } else {
@@ -216,27 +230,41 @@ fn display_instruction_inner(
         }
         Instruction::Call { func, arguments } => {
             let arguments = value_list(dfg, arguments);
-            writeln!(f, "call {}({}){}", show(*func), arguments, result_types(dfg, results))
+            writeln!(
+                f,
+                "call {}({}){} // L{}",
+                show(*func),
+                arguments,
+                result_types(dfg, results),
+                callstack_id.index()
+            )
         }
         Instruction::Allocate => {
-            writeln!(f, "allocate{}", result_types(dfg, results))
+            writeln!(f, "allocate{} // L{}", result_types(dfg, results), callstack_id.index())
         }
         Instruction::Load { address } => {
-            writeln!(f, "load {}{}", show(*address), result_types(dfg, results))
+            writeln!(
+                f,
+                "load {}{} // L{}",
+                show(*address),
+                result_types(dfg, results),
+                callstack_id.index()
+            )
         }
         Instruction::Store { address, value } => {
-            writeln!(f, "store {} at {}", show(*value), show(*address))
+            writeln!(f, "store {} at {} // L{}", show(*value), show(*address), callstack_id.index())
         }
         Instruction::EnableSideEffectsIf { condition } => {
-            writeln!(f, "enable_side_effects {}", show(*condition))
+            writeln!(f, "enable_side_effects {} // L{}", show(*condition), callstack_id.index())
         }
         Instruction::ArrayGet { array, index } => {
             writeln!(
                 f,
-                "array_get {}, index {}{}",
+                "array_get {}, index {}{} // L{}",
                 show(*array),
                 show(*index),
-                result_types(dfg, results)
+                result_types(dfg, results),
+                callstack_id.index()
             )
         }
         Instruction::ArraySet { array, index, value, mutable } => {
@@ -244,16 +272,26 @@ fn display_instruction_inner(
             let index = show(*index);
             let value = show(*value);
             let mutable = if *mutable { " mut" } else { "" };
-            writeln!(f, "array_set{mutable} {array}, index {index}, value {value}")
+            writeln!(
+                f,
+                "array_set{mutable} {array}, index {index}, value {value} // L{}",
+                callstack_id.index()
+            )
         }
         Instruction::IncrementRc { value } => {
-            writeln!(f, "inc_rc {}", show(*value))
+            writeln!(f, "inc_rc {} // L{}", show(*value), callstack_id.index())
         }
         Instruction::DecrementRc { value } => {
-            writeln!(f, "dec_rc {}", show(*value))
+            writeln!(f, "dec_rc {} // L{}", show(*value), callstack_id.index())
         }
         Instruction::RangeCheck { value, max_bit_size, .. } => {
-            writeln!(f, "range_check {} to {} bits", show(*value), *max_bit_size,)
+            writeln!(
+                f,
+                "range_check {} to {} bits // L{}",
+                show(*value),
+                *max_bit_size,
+                callstack_id.index()
+            )
         }
         Instruction::IfElse { then_condition, then_value, else_condition, else_value } => {
             let then_condition = show(*then_condition);
@@ -262,7 +300,8 @@ fn display_instruction_inner(
             let else_value = show(*else_value);
             writeln!(
                 f,
-                "if {then_condition} then {then_value} else (if {else_condition}) {else_value}"
+                "if {then_condition} then {then_value} else (if {else_condition}) {else_value} // L{}",
+                callstack_id.index()
             )
         }
         Instruction::MakeArray { elements, typ } => {
@@ -281,9 +320,19 @@ fn display_instruction_inner(
             {
                 if let Some(string) = try_byte_array_to_string(elements, dfg) {
                     if is_slice {
-                        return writeln!(f, "make_array &b{:?}", string);
+                        return writeln!(
+                            f,
+                            "make_array &b{:?} // L{}",
+                            string,
+                            callstack_id.index()
+                        );
                     } else {
-                        return writeln!(f, "make_array b{:?}", string);
+                        return writeln!(
+                            f,
+                            "make_array b{:?} // L{}",
+                            string,
+                            callstack_id.index()
+                        );
                     }
                 }
             }
@@ -301,9 +350,9 @@ fn display_instruction_inner(
                 write!(f, "{}", value)?;
             }
 
-            writeln!(f, "] : {typ}")
+            writeln!(f, "] : {typ} // L{}", callstack_id.index())
         }
-        Instruction::Noop => writeln!(f, "nop"),
+        Instruction::Noop => writeln!(f, "nop // L{}", callstack_id.index()),
     }
 }
 

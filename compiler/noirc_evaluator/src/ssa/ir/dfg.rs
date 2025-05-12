@@ -95,7 +95,9 @@ pub(crate) struct DataFlowGraph {
     ///
     /// Instructions inserted by internal SSA passes that don't correspond to user code
     /// may not have a corresponding location.
-    #[serde(skip)]
+
+    // #[serde(skip)]
+    #[serde_as(as = "HashMap<DisplayFromStr, _>")]
     locations: HashMap<InstructionId, CallStackId>,
 
     pub(crate) call_stack_data: CallStackHelper,

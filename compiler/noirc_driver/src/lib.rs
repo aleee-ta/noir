@@ -88,8 +88,8 @@ pub struct CompileOptions {
     #[arg(long, hide = true)]
     pub emit_ssa: bool,
 
-    #[arg(long, hide = true)]
-    pub cache_ssa: bool,
+    #[arg(long, hide = true, num_args = 0..1, default_missing_value = "timestamp")]
+    pub cache_ir: Option<String>,
 
     #[arg(long, hide = true)]
     pub show_brillig: bool,
@@ -715,7 +715,7 @@ pub fn compile_no_check(
         || options.show_ssa
         || options.show_ssa_pass.is_some()
         || options.emit_ssa
-        || options.cache_ssa;
+        || options.cache_ir.is_some();
 
     // Hash the AST program, which is going to be used to fingerprint the compilation artifact.
     let hash = fxhash::hash64(&program);
@@ -751,7 +751,15 @@ pub fn compile_no_check(
             ExpressionWidth::default()
         },
         emit_ssa: if options.emit_ssa { Some(context.package_build_path.clone()) } else { None },
-        cache_ssa: if options.cache_ssa { Some(context.package_build_path.clone()) } else { None },
+        cache_ir: if options.cache_ir.is_some() {
+            let mut cache_path = context.package_build_path.clone();
+            cache_path.pop();
+            cache_path.push("cache");
+            cache_path.push(&options.cache_ir.clone().unwrap());
+            Some(cache_path)
+        } else {
+            None
+        },
         skip_underconstrained_check: options.skip_underconstrained_check,
         enable_brillig_constraints_check_lookback: options
             .enable_brillig_constraints_check_lookback,

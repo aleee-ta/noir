@@ -40,8 +40,6 @@ use noirc_frontend::{hir_def::function::FunctionSignature, monomorphization::ast
 use ssa_gen::Ssa;
 use tracing::{Level, span};
 
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::acir::GeneratedAcir;
 
 mod checks;
@@ -75,7 +73,7 @@ pub struct SsaEvaluatorOptions {
 
     /// Dump the unoptimized SSA to the supplied path if it exists
     pub emit_ssa: Option<PathBuf>,
-    pub cache_ssa: Option<PathBuf>,
+    pub cache_ir: Option<PathBuf>,
 
     /// Skip the check for under constrained values
     pub skip_underconstrained_check: bool,
@@ -337,7 +335,7 @@ where
     let ssa_gen_span_guard = ssa_gen_span.enter();
     let mut builder = builder.run_passes(primary)?;
     let passed = std::mem::take(&mut builder.passed);
-    let cache_ssa = builder.cache_ssa.clone();
+    let cache_ir = builder.cache_ir.clone();
     let mut ssa = builder.finish();
 
     let mut ssa_level_warnings = vec![];
@@ -356,7 +354,7 @@ where
         ssa_logging: options.ssa_logging.clone(),
         print_codegen_timings: options.print_codegen_timings,
         passed,
-        cache_ssa,
+        cache_ir,
     }
     .run_passes(&secondary(&brillig))?
     .finish();
@@ -405,7 +403,6 @@ where
 pub fn optimize_into_acir<S>(
     program: Program,
     options: &SsaEvaluatorOptions,
-    timestamp: u64,
     primary: &[SsaPass],
     secondary: S,
 ) -> Result<ArtifactsAndWarnings, RuntimeError>
@@ -417,8 +414,7 @@ where
         options.ssa_logging.clone(),
         options.print_codegen_timings,
         &options.emit_ssa,
-        &options.cache_ssa,
-        timestamp,
+        &options.cache_ir,
     )?;
 
     optimize_ssa_builder_into_acir(builder, options, primary, secondary)
@@ -515,12 +511,12 @@ where
 
     let func_sigs = program.function_signatures.clone();
 
-    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    //let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
     let ArtifactsAndWarnings(
         (generated_acirs, generated_brillig, brillig_function_names, error_types),
         ssa_level_warnings,
-    ) = optimize_into_acir(program, options, timestamp, primary, secondary)?;
+    ) = optimize_into_acir(program, options, primary, secondary)?;
 
     assert_eq!(
         generated_acirs.len(),
@@ -547,8 +543,7 @@ where
             debug_variables.clone(),
             debug_functions.clone(),
             debug_types.clone(),
-            &options.cache_ssa,
-            timestamp,
+            &options.cache_ir,
         );
         program_artifact.add_circuit(circuit_artifact, is_main);
         is_main = false;
@@ -574,8 +569,7 @@ pub fn convert_generated_acir_into_circuit(
     debug_variables: DebugVariables,
     debug_functions: DebugFunctions,
     debug_types: DebugTypes,
-    cache_ssa: &Option<PathBuf>,
-    timestamp: u64,
+    cache_ir: &Option<PathBuf>,
 ) -> SsaCircuitArtifact {
     let opcodes = generated_acir.take_opcodes();
     let current_witness_index = generated_acir.current_witness_index().0;
@@ -624,41 +618,40 @@ pub fn convert_generated_acir_into_circuit(
         brillig_procedure_locs,
     );
 
-    //export initial ACIR
-    if let Some(cache_ssa) = cache_ssa {
-        let mut cache_ssa_dir_uw = cache_ssa.clone();
-        cache_ssa_dir_uw.pop();
-        cache_ssa_dir_uw.push("cache");
-        cache_ssa_dir_uw.push(timestamp.to_string());
-        cache_ssa_dir_uw.push("acir");
-        create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
-        cache_ssa_dir_uw.push("ACIR");
-        cache_ssa_dir_uw.set_extension("initial.acir.json");
-        write_to_file(&serde_json::to_vec_pretty(&circuit).unwrap(), &cache_ssa_dir_uw);
-        cache_ssa_dir_uw.pop();
-        cache_ssa_dir_uw.push("DEBUG");
-        cache_ssa_dir_uw.set_extension("initial.acir.json");
-        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ssa_dir_uw);
+    // Export initial ACIR
+    if let Some(cache_ir) = cache_ir {
+        let mut cache_ir_dir_uw = cache_ir.clone();
+        cache_ir_dir_uw.push("acir");
+        create_named_dir(cache_ir_dir_uw.as_ref(), "target/cache/timestamp/acir");
+
+        cache_ir_dir_uw.push("00_initial");
+        cache_ir_dir_uw.set_extension("acir.json");
+        write_to_file(&serde_json::to_vec_pretty(&circuit).unwrap(), &cache_ir_dir_uw);
+        cache_ir_dir_uw.set_extension("txt");
+        write_to_file(format!("{}", &circuit).as_bytes(), &cache_ir_dir_uw);
+        cache_ir_dir_uw.pop();
+        cache_ir_dir_uw.push("00_initial");
+        cache_ir_dir_uw.set_extension("debug.json");
+        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ir_dir_uw);
     }
 
     // Perform any ACIR-level optimizations
     let (optimized_circuit, transformation_map) = acvm::compiler::optimize(circuit);
     debug_info.update_acir(transformation_map);
 
-    if let Some(cache_ssa) = cache_ssa {
-        let mut cache_ssa_dir_uw = cache_ssa.clone();
-        cache_ssa_dir_uw.pop();
-        cache_ssa_dir_uw.push("cache");
-        cache_ssa_dir_uw.push(timestamp.to_string());
-        cache_ssa_dir_uw.push("acir");
-        create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/acir");
-        cache_ssa_dir_uw.push("ACIR");
-        cache_ssa_dir_uw.set_extension("optimized.acir.json");
-        write_to_file(&serde_json::to_vec_pretty(&optimized_circuit).unwrap(), &cache_ssa_dir_uw);
-        cache_ssa_dir_uw.pop();
-        cache_ssa_dir_uw.push("DEBUG");
-        cache_ssa_dir_uw.set_extension("optimized.acir.json");
-        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ssa_dir_uw);
+    if let Some(cache_ir) = cache_ir {
+        let mut cache_ir_dir_uw = cache_ir.clone();
+        cache_ir_dir_uw.push("acir");
+        create_named_dir(cache_ir_dir_uw.as_ref(), "target/cache/timestamp/acir");
+        cache_ir_dir_uw.push("01_optimized");
+        cache_ir_dir_uw.set_extension("acir.json");
+        write_to_file(&serde_json::to_vec_pretty(&optimized_circuit).unwrap(), &cache_ir_dir_uw);
+        cache_ir_dir_uw.set_extension("txt");
+        write_to_file(format!("{}", &optimized_circuit).as_bytes(), &cache_ir_dir_uw);
+        cache_ir_dir_uw.pop();
+        cache_ir_dir_uw.push("01_optimized");
+        cache_ir_dir_uw.set_extension("debug.json");
+        write_to_file(&serde_json::to_vec_pretty(&debug_info).unwrap(), &cache_ir_dir_uw);
     }
 
     SsaCircuitArtifact {
@@ -712,7 +705,7 @@ pub struct SsaBuilder {
     pub ssa_logging: SsaLogging,
     pub print_codegen_timings: bool,
     pub passed: HashMap<String, usize>,
-    pub cache_ssa: Option<PathBuf>,
+    pub cache_ir: Option<PathBuf>,
 }
 
 impl SsaBuilder {
@@ -721,8 +714,7 @@ impl SsaBuilder {
         ssa_logging: SsaLogging,
         print_codegen_timings: bool,
         emit_ssa: &Option<PathBuf>,
-        cache_ssa: &Option<PathBuf>,
-        timestamp: u64,
+        cache_ir: &Option<PathBuf>,
     ) -> Result<SsaBuilder, RuntimeError> {
         let ssa = ssa_gen::generate_ssa(program)?;
         if let Some(emit_ssa) = emit_ssa {
@@ -731,25 +723,27 @@ impl SsaBuilder {
             // and attempt to create the target directory if it does not exist.
             emit_ssa_dir.pop();
             create_named_dir(emit_ssa_dir.as_ref(), "target");
-            let ssa_path = emit_ssa.with_extension("ssa.json");
+            let mut ssa_path = emit_ssa.with_extension("ssa.json");
             write_to_file(&serde_json::to_vec_pretty(&ssa).unwrap(), &ssa_path);
+            ssa_path.set_extension("txt");
+            write_to_file(format!("{}", &ssa).as_bytes(), &ssa_path);
         }
-        let mut cache_ssa_dir = None;
-        if let Some(cache_ssa) = cache_ssa {
-            let mut cache_ssa_dir_uw = cache_ssa.clone();
-            cache_ssa_dir_uw.pop();
-            cache_ssa_dir_uw.push("cache");
-            cache_ssa_dir_uw.push(timestamp.to_string());
-            cache_ssa_dir_uw.push("ssa");
-            create_named_dir(cache_ssa_dir_uw.as_ref(), "target/cache/timestamp/ssa");
-            cache_ssa_dir = Some(cache_ssa_dir_uw.clone());
+        let mut cache_ir_dir = None;
+        if let Some(cache_ir) = cache_ir {
+            let mut cache_ir_dir_uw = cache_ir.clone();
+            // cache_ir_dir_uw.pop();
+            // cache_ir_dir_uw.push("cache");
+            // cache_ir_dir_uw.push(timestamp.to_string());
+            cache_ir_dir_uw.push("ssa");
+            create_named_dir(cache_ir_dir_uw.as_ref(), "target/cache/timestamp/ssa");
+            cache_ir_dir = Some(cache_ir_dir_uw.clone());
         }
         let builder = SsaBuilder {
             ssa_logging,
             print_codegen_timings,
             ssa,
             passed: Default::default(),
-            cache_ssa: cache_ssa_dir,
+            cache_ir: cache_ir_dir,
         };
         let builder = builder.print("00_initial", "Initial SSA");
         Ok(builder)
@@ -811,8 +805,8 @@ impl SsaBuilder {
             println!("After {msg}:\n{}", self.ssa);
         }
 
-        if let Some(cache_ssa_dir) = &self.cache_ssa {
-            let mut ssa_path = cache_ssa_dir.clone();
+        if let Some(cache_ir_dir) = &self.cache_ir {
+            let mut ssa_path = cache_ir_dir.clone();
             ssa_path.push(name);
             //ssa_path.set_extension("ssa.debug");
             //write_to_file(format!("{:?}", &self.ssa).as_bytes(), &ssa_path);
@@ -820,6 +814,8 @@ impl SsaBuilder {
             //write_to_file(format!("{:?}",&serde_json::to_vec_pretty(&self.ssa)).as_bytes(), &ssa_path);
             ssa_path.set_extension("ssa.json");
             write_to_file(&serde_json::to_vec_pretty(&self.ssa).unwrap(), &ssa_path);
+            ssa_path.set_extension("txt");
+            write_to_file(format!("{}", &self.ssa).as_bytes(), &ssa_path);
         }
 
         self
